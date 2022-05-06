@@ -23,6 +23,8 @@ Il calcule 2 rasters :
     - un (A) issu de la formule perte de terre (A = R * K * LS * C) (résultats en tonnes / ha)
     - un qui convertit ce résultat (A) pour des rasters au pas de 5 mètres (résultats en kg / pixel)
     - un qui convertit le résultat (A) en épaisseur de sol érodée (résultats en mètre)
+    
+ATTENTION : dans le calcul de LS, l'hypothèse est prise que les pixels des rasters sont de taille 5m * 5m
 """
 
 
@@ -36,16 +38,21 @@ from osgeo import gdal
 
 # CUDA kernel
 @cuda.jit
-def my_kernel(R, K, tx_argile, tx_limon, tx_sable, LS, C, occ_sol, result_A, result_kg_px, result_epaisseur, occ_sol_coeff_c):
+def my_kernel(R, K, tx_argile, tx_limon, tx_sable, pente, L, S, C, occ_sol, result_A, result_kg_px, result_epaisseur, occ_sol_coeff_c):
     pos = cuda.grid(1)
     # Correspondance entre coefficient C et occupation du sol
     for i in range(occ_sol_coeff_c.shape[0]):
         if occ_sol[pos] == occ_sol_coeff_c[i, 0]:
-            C[pos] = occ_sol_coeff_c[i, 1] / 100
+            C[pos] = occ_sol_coeff_c[i, 1]
+            
+    # Calcul des coefficients L, S
+    L[pos] = 1.4 * math.pow((5/22.13), 0.4)
+    S[pos] = math.pow((math.sin(pente[pos]) / 0.0896), 1.3)
+    
     # Correspondance entre coefficient K et taux d'argile, limon et sable
     if tx_argile[pos] < 18 and tx_sable[pos] > 65:
         K[pos] = 0.0115
-    elif tx_argile[pos] > 18 and tx_sable[pos] > 65:
+    elif tx_argile[pos] > 18 and tx_argile[pos] < 35 and tx_sable[pos] > 65:
         K[pos] = 0.0311
     elif tx_argile[pos] < 35 and tx_sable[pos] < 15:
         K[pos] = 0.0438
@@ -54,7 +61,7 @@ def my_kernel(R, K, tx_argile, tx_limon, tx_sable, LS, C, occ_sol, result_A, res
     elif tx_argile[pos] > 60:
         K[pos] = 0.0170
         
-    result_A[pos] = R[pos] * K[pos] * LS[pos] * C[pos]
+    result_A[pos] = R[pos] * K[pos] * C[pos] * L[pos] * S[pos]
     result_kg_px[pos] = result_A[pos] * 0.0025 * 1000
     result_epaisseur[pos] = (result_kg_px[pos] / 1250) / 25
     
@@ -97,8 +104,8 @@ def main():
     #####################################################################################################################
     # pente.tif
             
-    fichier_LS = "LS.tif"
     fichier_R = "R.tif"
+    fichier_pente = "pente.tif"
     fichier_tx_argile = "taux_argile.tif"
     fichier_tx_limon = "taux_limon.tif"
     fichier_tx_sable = "taux_sable.tif"
@@ -116,15 +123,13 @@ def main():
         for ligne in mat:
             lignee = ligne.split("\n")[0].split("=")
             code_occ_sol = float(lignee[0])
-            coef_100_c = float(lignee[1])
-            tableauCorrespondanceCodes.append([code_occ_sol, coef_100_c])
+            coef_c = float(lignee[1])
+            tableauCorrespondanceCodes.append([code_occ_sol, coef_c])
         mat.close()
-    occ_sol_coeff_c = cuda.to_device(np.ascontiguousarray(np.array(tableauCorrespondanceCodes, dtype=np.float64)))
+    occ_sol_coeff_c = cuda.to_device(np.ascontiguousarray(tableauCorrespondanceCodes, dtype=np.float64))
     print("...Lecture tableau de correspondance coefficient C / Occupation du sol (CRUS) terminée en : ", datetime.datetime.now() - debut)
     
     # Lecture des rasters d'entrée
-    ds, dim1, dim2, h_LS, message = lecture_raster_tif(fichier_LS)
-    print(message)
     ds, dim1, dim2, h_R, message = lecture_raster_tif(fichier_R)
     print(message)
     ds, dim1, dim2, h_tx_argile, message = lecture_raster_tif(fichier_tx_argile)
@@ -135,11 +140,13 @@ def main():
     print(message)
     ds, dim1, dim2, h_occ_sol, message = lecture_raster_tif(fichier_occ_sol)
     print(message)
+    ds, dim1, dim2, h_pente, message = lecture_raster_tif(fichier_pente)
+    print(message)
     
     # Host code  
     
-    LS = cuda.to_device(np.ascontiguousarray(h_LS, dtype = np.float64))
-    R = cuda.to_device(np.ascontiguousarray(h_R, dtype = np.float64))
+    pente = cuda.to_device(np.ascontiguousarray(h_pente, dtype = np.float64))
+    R = cuda.to_device(np.ascontiguousarray(h_R, dtype = np.int16))
     tx_argile = cuda.to_device(np.ascontiguousarray(h_tx_argile, dtype = np.float64))
     tx_limon = cuda.to_device(np.ascontiguousarray(h_tx_limon, dtype = np.float64))
     tx_sable = cuda.to_device(np.ascontiguousarray(h_tx_sable, dtype = np.float64))
@@ -147,6 +154,8 @@ def main():
     
     C = cuda.device_array_like(occ_sol)
     K = cuda.device_array_like(occ_sol)
+    L = cuda.device_array_like(occ_sol)
+    S = cuda.device_array_like(occ_sol)
     result_A = cuda.device_array_like(occ_sol)
     result_epaisseur = cuda.device_array_like(occ_sol)
     result_kg_px = cuda.device_array_like(occ_sol)
@@ -157,7 +166,7 @@ def main():
     debut = datetime.datetime.now()
     threadsperblock = 1024
     blockspergrid = math.ceil(result_A.shape[0] / threadsperblock)
-    my_kernel[blockspergrid, threadsperblock](R, K, tx_argile, tx_limon, tx_sable, LS, C, occ_sol, result_A, result_kg_px, result_epaisseur, occ_sol_coeff_c)
+    my_kernel[blockspergrid, threadsperblock](R, K, tx_argile, tx_limon, tx_sable, pente, L, S, C, occ_sol, result_A, result_kg_px, result_epaisseur, occ_sol_coeff_c)
     print("...Traitement GPU terminé en : ", datetime.datetime.now() - debut)
     
     h_result_A = np.empty(shape=result_A.shape, dtype=result_A.dtype)
