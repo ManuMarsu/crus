@@ -38,7 +38,7 @@ def my_kernel(dataPentes,dataPermea,dataOccSol,dataBattance,dataResult,data_Ssba
             dataPentes[pos] = tabCorCod[i,1]
     for i in range(tabCoefBat.shape[0]):
         if dataBattance[pos] == tabCoefBat[i,0]:
-            dataResult[pos] = tabCoefBat[i,1] * (0.4 * dataPentes[pos] + 0.35 * dataPermea[pos] + 0.25 * dataOccSol[pos]) / 100
+            dataResult[pos] = tabCoefBat[i,1] * (0 * dataPentes[pos] + 0.6 * dataPermea[pos] + 0.4 * dataOccSol[pos]) / 100
     data_Ssbatt[pos] = 0 * dataPentes[pos] + 0.6 * dataPermea[pos] + 0.4 * dataOccSol[pos]
                  
     if dataResult[pos] < 0:
