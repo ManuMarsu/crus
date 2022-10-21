@@ -39,7 +39,7 @@ def my_kernel(dataPentes,dataPermea,dataOccSol,dataBattance,dataResult,data_Ssba
     for i in range(tabCoefBat.shape[0]):
         if dataBattance[pos] == tabCoefBat[i,0]:
             dataResult[pos] = tabCoefBat[i,1] * (0.4 * dataPentes[pos] + 0.35 * dataPermea[pos] + 0.25 * dataOccSol[pos]) / 100
-    data_Ssbatt[pos] = 0.4 * dataPentes[pos] + 0.35 * dataPermea[pos] + 0.25 * dataOccSol[pos]
+    data_Ssbatt[pos] = 0 * dataPentes[pos] + 0.6 * dataPermea[pos] + 0.4 * dataOccSol[pos]
                  
     if dataResult[pos] < 0:
         dataResult[pos] = -1
@@ -73,8 +73,8 @@ fichierRasterPermea = "perm.tif"
 fichierRasterOccSol = "occupation territoire.tif"
 fichierRasterBattance = "battance.tif"
 
-fichierSortieCRUS_battance = "SensibiliteProdRuiss_Bat2.tif"
-fichierSortieCRUS_DiffsansBattance = "Difference_Bat_SsBat2.tif"
+fichierSortieCRUS_battance = "SensibiliteProdRuiss_Bat2_sansPente.tif"
+fichierSortieCRUS_DiffsansBattance = "Difference_Bat_SsBat2_sansPente.tif"
 
 
 # Lecture tableau de correspondance du reclass
