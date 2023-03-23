@@ -35,8 +35,6 @@ def warp_raster(fichierRaster, raster_warped, outputBounds, resX, resY):
     raster = gdal.Warp(raster_warped, ds, outputBounds=outputBounds, xRes=resX, yRes=resY, resampleAlg='bilinear', outputType=gdal.GDT_Int16, multithread=True)
     ds = None
     print("fin warp")
-    
-    
 
 def lire_raster(fichier, designation):
     debut = datetime.datetime.now()
@@ -52,17 +50,21 @@ def lire_raster(fichier, designation):
     print(f"...Lecture {designation} terminée en : ", datetime.datetime.now() - debut)
     return {"ds":ds, "geotransform":geotransform, "projection":projection, "xmin":xmin, "ymax":ymax, "xmax":xmax, "ymin":ymin, "resX":resX, "resY":resY}
 
-# CUDA kernel
+
+# CUDA kernel (prise en compte pente et sans pente et battance et sans battance)
 @cuda.jit
-def my_kernel(dataPentes,dataPermea,dataOccSol,dataBattance,dataResult,data_Ssbatt,dataDiff,tabCorCod,tabCoefBat):
+def my_kernel(dataPentes,dataPermea,dataOccSol,dataBattance,dataResult,data_Ssbatt,dataDiff,tabCorCod,tabCoefBat, dataResult_sp, data_Ssbatt_sp):
     pos = cuda.grid(1)
     for i in range(tabCorCod.shape[0]):
         if dataPentes[pos] == tabCorCod[i,0]:
             dataPentes[pos] = tabCorCod[i,1]
     for i in range(tabCoefBat.shape[0]):
         if dataBattance[pos] == tabCoefBat[i,0]:
-            dataResult[pos] = tabCoefBat[i,1] * (0.4 * dataPentes[pos] + 0.35 * dataPermea[pos] + 0.25 * dataOccSol[pos]) / 100
-    data_Ssbatt[pos] = 0.4 * dataPentes[pos] + 0.35 * dataPermea[pos] + 0.25 * dataOccSol[pos]
+            dataResult[pos] = tabCoefBat[i,1] * (0.4 * dataPentes[pos] + 0.35 * dataPermea[pos] + 0.25 * dataOccSol[pos]) / 100 # Avec influence de la pente
+            dataResult_sp[pos] = tabCoefBat[i,1] * (0 * dataPentes[pos] + 0.6 * dataPermea[pos] + 0.4 * dataOccSol[pos]) / 100
+    data_Ssbatt[pos] = 0.4 * dataPentes[pos] + 0.35 * dataPermea[pos] + 0.25 * dataOccSol[pos] # Avec influence de la pente
+    data_Ssbatt_sp[pos] = 0 * dataPentes[pos] + 0.6 * dataPermea[pos] + 0.4 * dataOccSol[pos]
+     
                  
     if dataResult[pos] < 0:
         dataResult[pos] = -1
@@ -74,6 +76,17 @@ def my_kernel(dataPentes,dataPermea,dataOccSol,dataBattance,dataResult,data_Ssba
         dataResult[pos] = 2
     else:
         dataResult[pos] = 3
+
+    if dataResult_sp[pos] < 0:
+        dataResult_sp[pos] = -1
+    elif dataResult_sp[pos] <= 32:
+        dataResult_sp[pos] = 0
+    elif dataResult_sp[pos] <= 42:
+        dataResult_sp[pos] = 1
+    elif dataResult_sp[pos] <=55:
+        dataResult_sp[pos] = 2
+    else:
+        dataResult_sp[pos] = 3
         
     if data_Ssbatt[pos] < 0:
         data_Ssbatt[pos] = -1
@@ -85,11 +98,31 @@ def my_kernel(dataPentes,dataPermea,dataOccSol,dataBattance,dataResult,data_Ssba
         data_Ssbatt[pos] = 2
     else:
         data_Ssbatt[pos] = 3
-    
-    if data_Ssbatt[pos] == dataResult[pos]:
-        dataDiff[pos] = 1
+
+    if data_Ssbatt_sp[pos] < 0:
+        data_Ssbatt_sp[pos] = -1
+    elif data_Ssbatt_sp[pos] <= 32:
+        data_Ssbatt_sp[pos] = 0
+    elif data_Ssbatt_sp[pos] <= 42:
+        data_Ssbatt_sp[pos] = 1
+    elif data_Ssbatt_sp[pos] <=55:
+        data_Ssbatt_sp[pos] = 2
     else:
-        dataDiff[pos] = -1
+        data_Ssbatt_sp[pos] = 3
+    
+    # Cas 1 : battance/pente = sans battance/pente                  dataResult[pos] == data_Ssbatt[pos]
+    # Cas 2 : battance/sans pente = sans battance/sans pente        dataResult_sp[pos] == data_Ssbatt_sp[pos]
+    # Cas 3 : battance/pente = battance/sans pente                  dataResult[pos] == dataResult_sp[pos]  
+    # Cas 4 : sans battance/pente = sans battance/sans pente        data_Ssbatt[pos] == data_Ssbatt_sp[pos]
+    dataDiff[pos] = 90000
+    if dataResult[pos] == data_Ssbatt[pos]:
+        dataDiff[pos] += 1000
+    if dataResult_sp[pos] == data_Ssbatt_sp[pos]:
+        dataDiff[pos] += 100
+    if dataResult[pos] == dataResult_sp[pos]:
+        dataDiff[pos] += 10
+    if data_Ssbatt[pos] == data_Ssbatt_sp[pos]:
+        dataDiff[pos] += 1
 
 fichierRasterPentes = "pentes.tif"
 fichierRasterPermea = "permea.tif"
@@ -98,8 +131,11 @@ fichierRasterOccSol_2021 = "os-2021-vf.tif"
 fichierRasterOccSol_modif = "os_modif-vf.tif"
 fichierRasterBattance = "battance.tif"
 
-fichierSortieCRUS_battance = "SensibiliteProdRuiss_Bat2.tif"
-fichierSortieCRUS_DiffsansBattance = "Difference_Bat_SsBat2.tif"
+fichierSortieCRUS_battance_pente = "ProdRuiss_Bat_Pent"
+fichierSortieCRUS_battance_ss_pente = "ProdRuiss_Bat_ssPent"
+fichierSortieCRUS_ss_battance_pente = "ProdRuiss_ssBat_Pent"
+fichierSortieCRUS_ss_battance_ss_pente = "ProdRuiss_ssBat_ssPent"
+fichierSortieCRUS_Diff = "Differences"
 
 
 # Lecture tableau de correspondance du reclass
@@ -133,7 +169,6 @@ print("...Lecture tableau de correspondance Terminée en : ", datetime.datetime.
 
 
 # Découpage selon l'emprise minimale
-
 dico = {"pente": lire_raster(fichierRasterPentes, "pente"), 
         "permea": lire_raster(fichierRasterPermea, "permea"), 
         "occsol": lire_raster(fichierRasterOccSol_5a, "occsol"), 
@@ -152,13 +187,12 @@ resX = max([ds["resX"] for ds in dico.values()])
 resY = max([ds["resY"] for ds in dico.values()])
 
 # Découper chaque raster pour qu'il corresponde à l'emprise et la résolution souhaitées
-
-t1 = threading.Thread(target=warp_raster, args=(fichierRasterPermea, "permearepr", [xmin, ymin, xmax, ymax], resX, resY, ))
-t2a = threading.Thread(target=warp_raster, args=(fichierRasterOccSol_5a, "occsolrepr_5a", [xmin, ymin, xmax, ymax], resX, resY, ))
-t2b = threading.Thread(target=warp_raster, args=(fichierRasterOccSol_2021, "occsolrepr_2021", [xmin, ymin, xmax, ymax], resX, resY, ))
-t2c = threading.Thread(target=warp_raster, args=(fichierRasterOccSol_modif, "occsolrepr_modif", [xmin, ymin, xmax, ymax], resX, resY, ))
-t3 = threading.Thread(target=warp_raster, args=(fichierRasterBattance, "battrepr", [xmin, ymin, xmax, ymax], resX, resY, ))
-t4 = threading.Thread(target=warp_raster, args=(fichierRasterPentes, "penterepr", [xmin, ymin, xmax, ymax], resX, resY, ))
+t1 = threading.Thread(target=warp_raster, args=(fichierRasterPermea, "permearepr.tif", [xmin, ymin, xmax, ymax], resX, resY, ))
+t2a = threading.Thread(target=warp_raster, args=(fichierRasterOccSol_5a, "occsolrepr_5a.tif", [xmin, ymin, xmax, ymax], resX, resY, ))
+t2b = threading.Thread(target=warp_raster, args=(fichierRasterOccSol_2021, "occsolrepr_2021.tif", [xmin, ymin, xmax, ymax], resX, resY, ))
+t2c = threading.Thread(target=warp_raster, args=(fichierRasterOccSol_modif, "occsolrepr_modif.tif", [xmin, ymin, xmax, ymax], resX, resY, ))
+t3 = threading.Thread(target=warp_raster, args=(fichierRasterBattance, "battrepr.tif", [xmin, ymin, xmax, ymax], resX, resY, ))
+t4 = threading.Thread(target=warp_raster, args=(fichierRasterPentes, "penterepr.tif", [xmin, ymin, xmax, ymax], resX, resY, ))
 
 t1.start()
 t2a.start()
@@ -175,47 +209,14 @@ t3.join()
 t4.join()
 
 
-rasterPermea = gdal.Open("permearepr").ReadAsArray()
-rasterOccSol_5a = gdal.Open("occsolrepr_5a").ReadAsArray()
-rasterOccSol_2021 = gdal.Open("occsolrepr_2021").ReadAsArray()
-rasterOccSol_modif = gdal.Open("occsolrepr_modif").ReadAsArray()
-rasterBattance = gdal.Open("battrepr").ReadAsArray()
-rasterPentes = gdal.Open("penterepr").ReadAsArray()
-
-'''
-ds = gdal.Open(fichierRasterPermea)
-print("début warp permea")
-rasterPermea = gdal.Warp('permearepr', ds, outputBounds=[xmin, ymin, xmax, ymax], xRes=resX, yRes=resY, resampleAlg='bilinear', outputType=gdal.GDT_Int16, multithread=True).ReadAsArray()
-ds = None
-print("fin warp permea" + str(rasterPermea.shape))
-
-ds = gdal.Open(fichierRasterOccSol)
-print("début warp occsol")
-rasterOccSol = gdal.Warp('occsolrepr', ds, outputBounds=[xmin, ymin, xmax, ymax], xRes=resX, yRes=resY, resampleAlg='bilinear', outputType=gdal.GDT_Int16, multithread=True).ReadAsArray()
-ds = None
-print("fin warp occsol")
-
-ds = gdal.Open(fichierRasterBattance)
-print("début warp battance")
-rasterBattance = gdal.Warp('battrepr', ds, outputBounds=[xmin, ymin, xmax, ymax], xRes=resX, yRes=resY, resampleAlg='bilinear', outputType=gdal.GDT_Int16, multithread=True).ReadAsArray()
-ds = None
-print("fin warp battance")
-
-ds = gdal.Open(fichierRasterPentes)
-print("début warp pentes")
-rasterPentes = gdal.Warp('penterepr', ds, outputBounds=[xmin, ymin, xmax, ymax], xRes=resX, yRes=resY, resampleAlg='bilinear', outputType=gdal.GDT_Int16, multithread=True).ReadAsArray()
-ds = None
-print("fin warp pentes")
-'''
-
-
-rasterOccSol_5a = gdal.Open("occsolrepr_5a").ReadAsArray()
-rasterOccSol_2021 = gdal.Open("occsolrepr_2021").ReadAsArray()
-rasterOccSol_modif = gdal.Open("occsolrepr_modif").ReadAsArray()
-
+rasterPermea = gdal.Open("permearepr.tif").ReadAsArray()
+rasterOccSol_5a = gdal.Open("occsolrepr_5a.tif").ReadAsArray()
+rasterOccSol_2021 = gdal.Open("occsolrepr_2021.tif").ReadAsArray()
+rasterOccSol_modif = gdal.Open("occsolrepr_modif.tif").ReadAsArray()
+rasterBattance = gdal.Open("battrepr.tif").ReadAsArray()
+rasterPentes = gdal.Open("penterepr.tif").ReadAsArray()
 
 (dim1,dim2) = rasterPentes.shape
-
 
 # Host code   
 dataPentes = rasterPentes.reshape(dim1*dim2)
@@ -226,14 +227,20 @@ dataOccSol_modif = rasterOccSol_modif.reshape(dim1*dim2)
 dataBattance = rasterBattance.reshape(dim1*dim2)
 dimtot = dim1*dim2
 
+dimmax = 100000000
+
 # _5a ###########################################################################
-if dimtot > 1000000000:
-    nb = dimtot // 1000000000
+suff = "_5a.tif"
+if dimtot > dimmax:
+    nb = dimtot // dimmax
     dataPentes_lst = np.array_split(dataPentes, nb)
     dataPermea_lst = np.array_split(dataPermea, nb)
     dataOccSol_lst = np.array_split(dataOccSol_5a, nb)
     dataBattance_lst = np.array_split(dataBattance, nb)
     raster_result_lst = []
+    raster_result_sp_lst = []
+    raster_result_ssbatt_lst = []
+    raster_result_ssbatt_sp_lst = []
     raster_diff_lst = []
     for i in range(nb):
         dataPentes_p = dataPentes_lst[i]
@@ -242,71 +249,130 @@ if dimtot > 1000000000:
         dataBattance_p = dataBattance_lst[i]
         
         dataResult_p = dataOccSol_p.copy()
+        dataResult_sp = dataOccSol_p.copy()
+        data_Ssbatt_sp = dataOccSol_p.copy()
         dataDiff_p = dataOccSol_p.copy()
         data_Ssbatt_p = dataResult_p.copy()
         debut = datetime.datetime.now()
         threadsperblock = 1024
         blockspergrid = math.ceil(dataResult_p.shape[0] / threadsperblock)
-        my_kernel[blockspergrid, threadsperblock](dataPentes_p,dataPermea_p,dataOccSol_p,dataBattance_p,dataResult_p,data_Ssbatt_p,dataDiff_p,tabCorCod,tabCoefBat)
+        my_kernel[blockspergrid, threadsperblock](dataPentes_p,dataPermea_p,dataOccSol_p,dataBattance_p,dataResult_p,data_Ssbatt_p,dataDiff_p,tabCorCod,tabCoefBat, dataResult_sp, data_Ssbatt_sp)
         print("...Traitement GPU terminé en : ", datetime.datetime.now() - debut)
         
         raster_result_lst.append(dataResult_p)
+        raster_result_sp_lst.append(dataResult_sp)
+        raster_result_ssbatt_lst.append(data_Ssbatt_p)
+        raster_result_ssbatt_sp_lst.append(data_Ssbatt_sp)
         raster_diff_lst.append(dataDiff_p)
-    raster_result_p = np.concatenate(tuple(raster_result_lst))
-    raster_diff_p = np.concatenate(tuple(raster_diff_lst))
+    raster_result = np.concatenate(tuple(raster_result_lst))
+    raster_result_sp = np.concatenate(tuple(raster_result_sp_lst))
+    raster_result_ssbatt = np.concatenate(tuple(raster_result_ssbatt_lst))
+    raster_result_ssbatt_sp = np.concatenate(tuple(raster_result_ssbatt_sp_lst))
+    raster_diff = np.concatenate(tuple(raster_diff_lst))
 else:
     dataResult = dataOccSol_5a.copy()
+    dataResult_sp = dataOccSol_5a.copy()
+    data_Ssbatt_sp = dataOccSol_5a.copy()
     dataDiff = dataOccSol_5a.copy()
     data_Ssbatt = dataResult.copy()
     debut = datetime.datetime.now()
     threadsperblock = 1024
     blockspergrid = math.ceil(dataResult.shape[0] / threadsperblock)
-    my_kernel[blockspergrid, threadsperblock](dataPentes,dataPermea,dataOccSol_5a,dataBattance,dataResult,data_Ssbatt,dataDiff,tabCorCod,tabCoefBat)
+    my_kernel[blockspergrid, threadsperblock](dataPentes,dataPermea,dataOccSol_5a,dataBattance,dataResult,data_Ssbatt,dataDiff,tabCorCod,tabCoefBat, dataResult_sp, data_Ssbatt_sp)
     print("...Traitement GPU terminé en : ", datetime.datetime.now() - debut)
-    raster_result_p = dataResult.reshape(dim1,dim2)
-    raster_diff_p = dataDiff.reshape(dim1,dim2)
-    
-raster_result = raster_result_p.reshape(dim1,dim2)
-raster_diff = raster_diff_p.reshape(dim1,dim2)
+    raster_result = dataResult.reshape(dim1,dim2)
+    raster_result_ssbatt = data_Ssbatt.reshape(dim1,dim2)
+    raster_result_ssbatt_sp = data_Ssbatt_sp.reshape(dim1,dim2)
+    raster_result_sp = dataResult_sp.reshape(dim1,dim2)
+    raster_diff = dataDiff.reshape(dim1,dim2)
 
-
-# Ecriture du fichier de sortie
+# Ecriture du fichier de sortie "ProdRuiss_Bat_Pent"
 debut = datetime.datetime.now()
 driver = gdal.GetDriverByName("GTiff")
-outdata = driver.Create(fichierSortieCRUS_battance + "5a.tif", dim2, dim1, 1, gdal.GDT_Int16)
-ds = gdal.Open("permearepr")
+outdata = driver.Create(fichierSortieCRUS_battance_pente + suff, dim2, dim1, 1, gdal.GDT_Int16)
+ds = gdal.Open("permearepr.tif")
 outdata.SetGeoTransform(ds.GetGeoTransform())##sets same geotransform as input
 outdata.SetProjection(ds.GetProjection())##sets same projection as input
 outdata.GetRasterBand(1).WriteArray(raster_result)
 outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparent
 outdata.FlushCache() ##saves to disk!!
-
+outdata = None
+ds=None
 print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
-print("...Temps total de traitement : ", datetime.datetime.now() - t0)
 
-# Ecriture du fichier de sortie
+# Ecriture du fichier de sortie "ProdRuiss_Bat_ssPent"
 debut = datetime.datetime.now()
 driver = gdal.GetDriverByName("GTiff")
-outdiff = driver.Create(fichierSortieCRUS_DiffsansBattance + "5a.tif", dim2, dim1, 1, gdal.GDT_Int16)
+outdata = driver.Create(fichierSortieCRUS_battance_ss_pente + suff, dim2, dim1, 1, gdal.GDT_Int16)
+ds = gdal.Open("permearepr.tif")
+outdata.SetGeoTransform(ds.GetGeoTransform())##sets same geotransform as input
+outdata.SetProjection(ds.GetProjection())##sets same projection as input
+outdata.GetRasterBand(1).WriteArray(raster_result_sp)
+outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparent
+outdata.FlushCache() ##saves to disk!!
+outdata = None
+ds=None
+print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
+
+# Ecriture du fichier de sortie "ProdRuiss_ssBat_Pent"
+debut = datetime.datetime.now()
+driver = gdal.GetDriverByName("GTiff")
+outdata = driver.Create(fichierSortieCRUS_ss_battance_pente + suff, dim2, dim1, 1, gdal.GDT_Int16)
+ds = gdal.Open("permearepr.tif")
+outdata.SetGeoTransform(ds.GetGeoTransform())##sets same geotransform as input
+outdata.SetProjection(ds.GetProjection())##sets same projection as input
+outdata.GetRasterBand(1).WriteArray(raster_result_ssbatt)
+outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparent
+outdata.FlushCache() ##saves to disk!!
+outdata = None
+ds=None
+print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
+
+# Ecriture du fichier de sortie "ProdRuiss_ssBat_ssPent"
+debut = datetime.datetime.now()
+driver = gdal.GetDriverByName("GTiff")
+outdata = driver.Create(fichierSortieCRUS_ss_battance_ss_pente + suff, dim2, dim1, 1, gdal.GDT_Int16)
+ds = gdal.Open("permearepr.tif")
+outdata.SetGeoTransform(ds.GetGeoTransform())##sets same geotransform as input
+outdata.SetProjection(ds.GetProjection())##sets same projection as input
+outdata.GetRasterBand(1).WriteArray(raster_result_ssbatt_sp)
+outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparent
+outdata.FlushCache() ##saves to disk!!
+outdata = None
+ds=None
+print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
+
+print("...Temps total de traitement : ", datetime.datetime.now() - t0)
+
+# Ecriture du fichier des différences
+debut = datetime.datetime.now()
+driver = gdal.GetDriverByName("GTiff")
+outdiff = driver.Create(fichierSortieCRUS_Diff + suff, dim2, dim1, 1, gdal.GDT_Int16)
+ds = gdal.Open("permearepr.tif")
 outdiff.SetGeoTransform(ds.GetGeoTransform())##sets same geotransform as input
 outdiff.SetProjection(ds.GetProjection())##sets same projection as input
 outdiff.GetRasterBand(1).WriteArray(raster_diff)
-outdiff.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparent
+outdiff.GetRasterBand(1).SetNoDataValue(91111)##if you want these values transparent
 outdiff.FlushCache() ##saves to disk!!
 outdiff = None
 ds=None
+print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
 
-outdata = None
-ds=None
+print("...Temps total de traitement : ", datetime.datetime.now() - t0)
+
 
 # _2021 ###########################################################################
-if dimtot > 1000000000:
-    nb = dimtot // 1000000000
+suff = "_2021.tif"
+if dimtot > dimmax:
+    nb = dimtot // dimmax
     dataPentes_lst = np.array_split(dataPentes, nb)
     dataPermea_lst = np.array_split(dataPermea, nb)
     dataOccSol_lst = np.array_split(dataOccSol_2021, nb)
     dataBattance_lst = np.array_split(dataBattance, nb)
     raster_result_lst = []
+    raster_result_sp_lst = []
+    raster_result_ssbatt_lst = []
+    raster_result_ssbatt_sp_lst = []
     raster_diff_lst = []
     for i in range(nb):
         dataPentes_p = dataPentes_lst[i]
@@ -315,71 +381,129 @@ if dimtot > 1000000000:
         dataBattance_p = dataBattance_lst[i]
         
         dataResult_p = dataOccSol_p.copy()
+        dataResult_sp = dataOccSol_p.copy()
+        data_Ssbatt_sp = dataOccSol_p.copy()
         dataDiff_p = dataOccSol_p.copy()
         data_Ssbatt_p = dataResult_p.copy()
         debut = datetime.datetime.now()
         threadsperblock = 1024
         blockspergrid = math.ceil(dataResult_p.shape[0] / threadsperblock)
-        my_kernel[blockspergrid, threadsperblock](dataPentes_p,dataPermea_p,dataOccSol_p,dataBattance_p,dataResult_p,data_Ssbatt_p,dataDiff_p,tabCorCod,tabCoefBat)
+        my_kernel[blockspergrid, threadsperblock](dataPentes_p,dataPermea_p,dataOccSol_p,dataBattance_p,dataResult_p,data_Ssbatt_p,dataDiff_p,tabCorCod,tabCoefBat, dataResult_sp, data_Ssbatt_sp)
         print("...Traitement GPU terminé en : ", datetime.datetime.now() - debut)
         
         raster_result_lst.append(dataResult_p)
+        raster_result_sp_lst.append(dataResult_sp)
+        raster_result_ssbatt_lst.append(data_Ssbatt_p)
+        raster_result_ssbatt_sp_lst.append(data_Ssbatt_sp)
         raster_diff_lst.append(dataDiff_p)
-    raster_result_p = np.concatenate(tuple(raster_result_lst))
-    raster_diff_p = np.concatenate(tuple(raster_diff_lst))
+    raster_result = np.concatenate(tuple(raster_result_lst))
+    raster_result_sp = np.concatenate(tuple(raster_result_sp_lst))
+    raster_result_ssbatt = np.concatenate(tuple(raster_result_ssbatt_lst))
+    raster_result_ssbatt_sp = np.concatenate(tuple(raster_result_ssbatt_sp_lst))
+    raster_diff = np.concatenate(tuple(raster_diff_lst))
 else:
     dataResult = dataOccSol_2021.copy()
+    dataResult_sp = dataOccSol_2021.copy()
+    data_Ssbatt_sp = dataOccSol_2021.copy()
     dataDiff = dataOccSol_2021.copy()
     data_Ssbatt = dataResult.copy()
     debut = datetime.datetime.now()
     threadsperblock = 1024
     blockspergrid = math.ceil(dataResult.shape[0] / threadsperblock)
-    my_kernel[blockspergrid, threadsperblock](dataPentes,dataPermea,dataOccSol_2021,dataBattance,dataResult,data_Ssbatt,dataDiff,tabCorCod,tabCoefBat)
+    my_kernel[blockspergrid, threadsperblock](dataPentes,dataPermea,dataOccSol_2021,dataBattance,dataResult,data_Ssbatt,dataDiff,tabCorCod,tabCoefBat, dataResult_sp, data_Ssbatt_sp)
     print("...Traitement GPU terminé en : ", datetime.datetime.now() - debut)
-    raster_result_p = dataResult.reshape(dim1,dim2)
-    raster_diff_p = dataDiff.reshape(dim1,dim2)
-    
-raster_result = raster_result_p.reshape(dim1,dim2)
-raster_diff = raster_diff_p.reshape(dim1,dim2)
+    raster_result = dataResult.reshape(dim1,dim2)
+    raster_result_ssbatt = data_Ssbatt.reshape(dim1,dim2)
+    raster_result_ssbatt_sp = data_Ssbatt_sp.reshape(dim1,dim2)
+    raster_result_sp = dataResult_sp.reshape(dim1,dim2)
+    raster_diff = dataDiff.reshape(dim1,dim2)
 
-
-# Ecriture du fichier de sortie
+# Ecriture du fichier de sortie "ProdRuiss_Bat_Pent"
 debut = datetime.datetime.now()
 driver = gdal.GetDriverByName("GTiff")
-outdata = driver.Create(fichierSortieCRUS_battance + "2021.tif", dim2, dim1, 1, gdal.GDT_Int16)
-ds = gdal.Open("permearepr")
+outdata = driver.Create(fichierSortieCRUS_battance_pente + suff, dim2, dim1, 1, gdal.GDT_Int16)
+ds = gdal.Open("permearepr.tif")
 outdata.SetGeoTransform(ds.GetGeoTransform())##sets same geotransform as input
 outdata.SetProjection(ds.GetProjection())##sets same projection as input
 outdata.GetRasterBand(1).WriteArray(raster_result)
 outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparent
 outdata.FlushCache() ##saves to disk!!
-
+outdata = None
+ds=None
 print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
-print("...Temps total de traitement : ", datetime.datetime.now() - t0)
 
-# Ecriture du fichier de sortie
+# Ecriture du fichier de sortie "ProdRuiss_Bat_ssPent"
 debut = datetime.datetime.now()
 driver = gdal.GetDriverByName("GTiff")
-outdiff = driver.Create(fichierSortieCRUS_DiffsansBattance + "2021.tif", dim2, dim1, 1, gdal.GDT_Int16)
+outdata = driver.Create(fichierSortieCRUS_battance_ss_pente + suff, dim2, dim1, 1, gdal.GDT_Int16)
+ds = gdal.Open("permearepr.tif")
+outdata.SetGeoTransform(ds.GetGeoTransform())##sets same geotransform as input
+outdata.SetProjection(ds.GetProjection())##sets same projection as input
+outdata.GetRasterBand(1).WriteArray(raster_result_sp)
+outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparent
+outdata.FlushCache() ##saves to disk!!
+outdata = None
+ds=None
+print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
+
+# Ecriture du fichier de sortie "ProdRuiss_ssBat_Pent"
+debut = datetime.datetime.now()
+driver = gdal.GetDriverByName("GTiff")
+outdata = driver.Create(fichierSortieCRUS_ss_battance_pente + suff, dim2, dim1, 1, gdal.GDT_Int16)
+ds = gdal.Open("permearepr.tif")
+outdata.SetGeoTransform(ds.GetGeoTransform())##sets same geotransform as input
+outdata.SetProjection(ds.GetProjection())##sets same projection as input
+outdata.GetRasterBand(1).WriteArray(raster_result_ssbatt)
+outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparent
+outdata.FlushCache() ##saves to disk!!
+outdata = None
+ds=None
+print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
+
+# Ecriture du fichier de sortie "ProdRuiss_ssBat_ssPent"
+debut = datetime.datetime.now()
+driver = gdal.GetDriverByName("GTiff")
+outdata = driver.Create(fichierSortieCRUS_ss_battance_ss_pente + suff, dim2, dim1, 1, gdal.GDT_Int16)
+ds = gdal.Open("permearepr.tif")
+outdata.SetGeoTransform(ds.GetGeoTransform())##sets same geotransform as input
+outdata.SetProjection(ds.GetProjection())##sets same projection as input
+outdata.GetRasterBand(1).WriteArray(raster_result_ssbatt_sp)
+outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparent
+outdata.FlushCache() ##saves to disk!!
+outdata = None
+ds=None
+print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
+
+print("...Temps total de traitement : ", datetime.datetime.now() - t0)
+
+# Ecriture du fichier des différences
+debut = datetime.datetime.now()
+driver = gdal.GetDriverByName("GTiff")
+outdiff = driver.Create(fichierSortieCRUS_Diff + suff, dim2, dim1, 1, gdal.GDT_Int16)
+ds = gdal.Open("permearepr.tif")
 outdiff.SetGeoTransform(ds.GetGeoTransform())##sets same geotransform as input
 outdiff.SetProjection(ds.GetProjection())##sets same projection as input
 outdiff.GetRasterBand(1).WriteArray(raster_diff)
-outdiff.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparent
+outdiff.GetRasterBand(1).SetNoDataValue(91111)##if you want these values transparent
 outdiff.FlushCache() ##saves to disk!!
 outdiff = None
 ds=None
+print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
 
-outdata = None
-ds=None
+print("...Temps total de traitement : ", datetime.datetime.now() - t0)
 
 # _modif ###########################################################################
-if dimtot > 1000000000:
-    nb = dimtot // 1000000000
+suff = "_modif.tif"
+if dimtot > dimmax:
+    nb = dimtot // dimmax
     dataPentes_lst = np.array_split(dataPentes, nb)
     dataPermea_lst = np.array_split(dataPermea, nb)
     dataOccSol_lst = np.array_split(dataOccSol_modif, nb)
     dataBattance_lst = np.array_split(dataBattance, nb)
     raster_result_lst = []
+    raster_result_sp_lst = []
+    raster_result_ssbatt_lst = []
+    raster_result_ssbatt_sp_lst = []
     raster_diff_lst = []
     for i in range(nb):
         dataPentes_p = dataPentes_lst[i]
@@ -388,64 +512,115 @@ if dimtot > 1000000000:
         dataBattance_p = dataBattance_lst[i]
         
         dataResult_p = dataOccSol_p.copy()
+        dataResult_sp = dataOccSol_p.copy()
+        data_Ssbatt_sp = dataOccSol_p.copy()
         dataDiff_p = dataOccSol_p.copy()
         data_Ssbatt_p = dataResult_p.copy()
         debut = datetime.datetime.now()
         threadsperblock = 1024
         blockspergrid = math.ceil(dataResult_p.shape[0] / threadsperblock)
-        my_kernel[blockspergrid, threadsperblock](dataPentes_p,dataPermea_p,dataOccSol_p,dataBattance_p,dataResult_p,data_Ssbatt_p,dataDiff_p,tabCorCod,tabCoefBat)
+        my_kernel[blockspergrid, threadsperblock](dataPentes_p,dataPermea_p,dataOccSol_p,dataBattance_p,dataResult_p,data_Ssbatt_p,dataDiff_p,tabCorCod,tabCoefBat, dataResult_sp, data_Ssbatt_sp)
         print("...Traitement GPU terminé en : ", datetime.datetime.now() - debut)
         
         raster_result_lst.append(dataResult_p)
+        raster_result_sp_lst.append(dataResult_sp)
+        raster_result_ssbatt_lst.append(data_Ssbatt_p)
+        raster_result_ssbatt_sp_lst.append(data_Ssbatt_sp)
         raster_diff_lst.append(dataDiff_p)
-    raster_result_p = np.concatenate(tuple(raster_result_lst))
-    raster_diff_p = np.concatenate(tuple(raster_diff_lst))
+    raster_result = np.concatenate(tuple(raster_result_lst))
+    raster_result_sp = np.concatenate(tuple(raster_result_sp_lst))
+    raster_result_ssbatt = np.concatenate(tuple(raster_result_ssbatt_lst))
+    raster_result_ssbatt_sp = np.concatenate(tuple(raster_result_ssbatt_sp_lst))
+    raster_diff = np.concatenate(tuple(raster_diff_lst))
 else:
     dataResult = dataOccSol_modif.copy()
+    dataResult_sp = dataOccSol_modif.copy()
+    data_Ssbatt_sp = dataOccSol_modif.copy()
     dataDiff = dataOccSol_modif.copy()
     data_Ssbatt = dataResult.copy()
     debut = datetime.datetime.now()
     threadsperblock = 1024
     blockspergrid = math.ceil(dataResult.shape[0] / threadsperblock)
-    my_kernel[blockspergrid, threadsperblock](dataPentes,dataPermea,dataOccSol_modif,dataBattance,dataResult,data_Ssbatt,dataDiff,tabCorCod,tabCoefBat)
+    my_kernel[blockspergrid, threadsperblock](dataPentes,dataPermea,dataOccSol_modif,dataBattance,dataResult,data_Ssbatt,dataDiff,tabCorCod,tabCoefBat, dataResult_sp, data_Ssbatt_sp)
     print("...Traitement GPU terminé en : ", datetime.datetime.now() - debut)
-    raster_result_p = dataResult.reshape(dim1,dim2)
-    raster_diff_p = dataDiff.reshape(dim1,dim2)
-    
-raster_result = raster_result_p.reshape(dim1,dim2)
-raster_diff = raster_diff_p.reshape(dim1,dim2)
+    raster_result = dataResult.reshape(dim1,dim2)
+    raster_result_ssbatt = data_Ssbatt.reshape(dim1,dim2)
+    raster_result_ssbatt_sp = data_Ssbatt_sp.reshape(dim1,dim2)
+    raster_result_sp = dataResult_sp.reshape(dim1,dim2)
+    raster_diff = dataDiff.reshape(dim1,dim2)
 
-
-# Ecriture du fichier de sortie
+# Ecriture du fichier de sortie "ProdRuiss_Bat_Pent"
 debut = datetime.datetime.now()
 driver = gdal.GetDriverByName("GTiff")
-outdata = driver.Create(fichierSortieCRUS_battance + "modif.tif", dim2, dim1, 1, gdal.GDT_Int16)
-ds = gdal.Open("permearepr")
+outdata = driver.Create(fichierSortieCRUS_battance_pente + suff, dim2, dim1, 1, gdal.GDT_Int16)
+ds = gdal.Open("permearepr.tif")
 outdata.SetGeoTransform(ds.GetGeoTransform())##sets same geotransform as input
 outdata.SetProjection(ds.GetProjection())##sets same projection as input
 outdata.GetRasterBand(1).WriteArray(raster_result)
 outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparent
 outdata.FlushCache() ##saves to disk!!
-
+outdata = None
+ds=None
 print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
-print("...Temps total de traitement : ", datetime.datetime.now() - t0)
 
-# Ecriture du fichier de sortie
+# Ecriture du fichier de sortie "ProdRuiss_Bat_ssPent"
 debut = datetime.datetime.now()
 driver = gdal.GetDriverByName("GTiff")
-outdiff = driver.Create(fichierSortieCRUS_DiffsansBattance + "modif.tif", dim2, dim1, 1, gdal.GDT_Int16)
+outdata = driver.Create(fichierSortieCRUS_battance_ss_pente + suff, dim2, dim1, 1, gdal.GDT_Int16)
+ds = gdal.Open("permearepr.tif")
+outdata.SetGeoTransform(ds.GetGeoTransform())##sets same geotransform as input
+outdata.SetProjection(ds.GetProjection())##sets same projection as input
+outdata.GetRasterBand(1).WriteArray(raster_result_sp)
+outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparent
+outdata.FlushCache() ##saves to disk!!
+outdata = None
+ds=None
+print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
+
+# Ecriture du fichier de sortie "ProdRuiss_ssBat_Pent"
+debut = datetime.datetime.now()
+driver = gdal.GetDriverByName("GTiff")
+outdata = driver.Create(fichierSortieCRUS_ss_battance_pente + suff, dim2, dim1, 1, gdal.GDT_Int16)
+ds = gdal.Open("permearepr.tif")
+outdata.SetGeoTransform(ds.GetGeoTransform())##sets same geotransform as input
+outdata.SetProjection(ds.GetProjection())##sets same projection as input
+outdata.GetRasterBand(1).WriteArray(raster_result_ssbatt)
+outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparent
+outdata.FlushCache() ##saves to disk!!
+outdata = None
+ds=None
+print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
+
+# Ecriture du fichier de sortie "ProdRuiss_ssBat_ssPent"
+debut = datetime.datetime.now()
+driver = gdal.GetDriverByName("GTiff")
+outdata = driver.Create(fichierSortieCRUS_ss_battance_ss_pente + suff, dim2, dim1, 1, gdal.GDT_Int16)
+ds = gdal.Open("permearepr.tif")
+outdata.SetGeoTransform(ds.GetGeoTransform())##sets same geotransform as input
+outdata.SetProjection(ds.GetProjection())##sets same projection as input
+outdata.GetRasterBand(1).WriteArray(raster_result_ssbatt_sp)
+outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparent
+outdata.FlushCache() ##saves to disk!!
+outdata = None
+ds=None
+print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
+
+print("...Temps total de traitement : ", datetime.datetime.now() - t0)
+
+# Ecriture du fichier des différences
+debut = datetime.datetime.now()
+driver = gdal.GetDriverByName("GTiff")
+outdiff = driver.Create(fichierSortieCRUS_Diff + suff, dim2, dim1, 1, gdal.GDT_Int16)
+ds = gdal.Open("permearepr.tif")
 outdiff.SetGeoTransform(ds.GetGeoTransform())##sets same geotransform as input
 outdiff.SetProjection(ds.GetProjection())##sets same projection as input
 outdiff.GetRasterBand(1).WriteArray(raster_diff)
-outdiff.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparent
+outdiff.GetRasterBand(1).SetNoDataValue(91111)##if you want these values transparent
 outdiff.FlushCache() ##saves to disk!!
 outdiff = None
 ds=None
-
-outdata = None
-ds=None
-
 print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
+
 print("...Temps total de traitement : ", datetime.datetime.now() - t0)
 
 
