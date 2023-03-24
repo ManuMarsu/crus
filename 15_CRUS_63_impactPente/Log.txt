@@ -1,23 +1,14 @@
-...Lecture tableau de correspondance Terminée en :  0:00:00.001001
-...Lecture tableau de correspondance Terminée en :  0:00:00.001002
-...Lecture pente terminée en :  0:00:00.164003
-...Lecture permea terminée en :  0:00:00.081000
-...Lecture occsol terminée en :  0:00:00.091001
-...Lecture batt terminée en :  0:00:00.085002
+*********************************************************** Début du traitement le 2023-03-24 14:57:01.514316 ***********************************************************...Lecture tableau de correspondance Terminée en : 0:00:00
+...Lecture tableau de correspondance Terminée en : 0:00:00.000999
+...Lecture pente terminée en : 0:00:00.225627
+...Lecture permea terminée en : 0:00:00.068772
+...Lecture occsol terminée en : 0:00:00.065188
+...Lecture occsol terminée en : 0:00:00.069139
+...Lecture occsol terminée en : 0:00:00.073640
+...Lecture batt terminée en : 0:00:00.068204
 début warp
-début warpdébut warp
 début warp
-
-fin warp
-fin warp
-fin warp
-fin warp
-...Traitement GPU terminé en :  0:00:11.336656
-...Traitement GPU terminé en :  0:00:07.172075
-...Traitement GPU terminé en :  0:00:15.033221
-...Traitement GPU terminé en :  0:00:19.080493
-...Traitement GPU terminé en :  0:00:18.471198
-...Ecriture fichier sortie terminée en :  0:00:30.731922
-...Temps total de traitement :  0:11:44.818796
-...Ecriture fichier sortie terminée en :  0:00:29.837899
-...Temps total de traitement :  0:12:14.656695
+début warp
+début warp
+début warp
+début warp

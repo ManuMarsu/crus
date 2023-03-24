@@ -31,10 +31,10 @@ import threading
 
 def warp_raster(fichierRaster, raster_warped, outputBounds, resX, resY):
     ds = gdal.Open(fichierRaster)
-    print("début warp")
+    log(fichier_log, "début warp")
     raster = gdal.Warp(raster_warped, ds, outputBounds=outputBounds, xRes=resX, yRes=resY, resampleAlg='bilinear', outputType=gdal.GDT_Int16, multithread=True)
     ds = None
-    print("fin warp")
+    log(fichier_log, "fin warp")
 
 def lire_raster(fichier, designation):
     debut = datetime.datetime.now()
@@ -47,8 +47,13 @@ def lire_raster(fichier, designation):
     ymin = geotransform[3] + (geotransform[5] * ds.RasterYSize)
     resX = geotransform[1]
     resY = -geotransform[5]
-    print(f"...Lecture {designation} terminée en : ", datetime.datetime.now() - debut)
+    log(fichier_log, f"...Lecture {designation} terminée en : {datetime.datetime.now() - debut}")
     return {"ds":ds, "geotransform":geotransform, "projection":projection, "xmin":xmin, "ymax":ymax, "xmax":xmax, "ymin":ymin, "resX":resX, "resY":resY}
+
+def log(fichier, texte):
+    with open(fichier, "a", encoding="utf-8") as f:
+        f.write(texte + "\n")
+    print(texte)
 
 
 # CUDA kernel (prise en compte pente et sans pente et battance et sans battance)
@@ -114,7 +119,7 @@ def my_kernel(dataPentes,dataPermea,dataOccSol,dataBattance,dataResult,data_Ssba
     # Cas 2 : battance/sans pente = sans battance/sans pente        dataResult_sp[pos] == data_Ssbatt_sp[pos]
     # Cas 3 : battance/pente = battance/sans pente                  dataResult[pos] == dataResult_sp[pos]  
     # Cas 4 : sans battance/pente = sans battance/sans pente        data_Ssbatt[pos] == data_Ssbatt_sp[pos]
-    dataDiff[pos] = 90000
+    dataDiff[pos] = 20000
     if dataResult[pos] == data_Ssbatt[pos]:
         dataDiff[pos] += 1000
     if dataResult_sp[pos] == data_Ssbatt_sp[pos]:
@@ -137,6 +142,13 @@ fichierSortieCRUS_ss_battance_pente = "ProdRuiss_ssBat_Pent"
 fichierSortieCRUS_ss_battance_ss_pente = "ProdRuiss_ssBat_ssPent"
 fichierSortieCRUS_Diff = "Differences"
 
+fichier_log = "log.txt"
+with open("log.txt", "w", encoding="utf-8") as f:
+    f.write("**************************************************")
+    f.write(f"********* Début du traitement le {datetime.datetime.now()} *********")
+    f.write("**************************************************")
+    f.write("")
+
 
 # Lecture tableau de correspondance du reclass
 t0 = datetime.datetime.now()
@@ -150,7 +162,7 @@ with open ("code_reclassPentes.txt", "r", encoding = "utf-8") as mat:
         tableauCorrespondanceCodes.append([code, codeMat])
     mat.close()
 tabCorCod = np.array(tableauCorrespondanceCodes)
-print("...Lecture tableau de correspondance Terminée en : ", datetime.datetime.now() - debut)
+log(fichier_log, f"...Lecture tableau de correspondance Terminée en : {datetime.datetime.now() - debut}")
 
 # Lecture tableau des coefficients multiplicateurs du reclass
 t0 = datetime.datetime.now()
@@ -164,7 +176,7 @@ with open ("codes_battance.txt", "r", encoding = "utf-8") as mat:
         tableauCoefBat.append([code, codeMat])
     mat.close()
 tabCoefBat = np.array(tableauCoefBat)
-print("...Lecture tableau de correspondance Terminée en : ", datetime.datetime.now() - debut)
+log(fichier_log, f"...Lecture tableau de correspondance Terminée en : {datetime.datetime.now() - debut}")
 
 
 
@@ -202,11 +214,17 @@ t3.start()
 t4.start()
 
 t1.join()
+log(fichier_log, f"...Fin du découpage permea - temps total = {datetime.datetime.now() - t0}")
 t2a.join()
+log(fichier_log, f"...Fin du découpage occsol_5a - temps total = {datetime.datetime.now() - t0}")
 t2b.join()
+log(fichier_log, f"...Fin du découpage occsol_2021 - temps total = {datetime.datetime.now() - t0}")
 t2c.join()
+log(fichier_log, f"...Fin du découpage occsol_modif - temps total = {datetime.datetime.now() - t0}")
 t3.join()
+log(fichier_log, f"...Fin du découpage battance - temps total = {datetime.datetime.now() - t0}")
 t4.join()
+log(fichier_log, f"...Fin du découpage pentes - temps total = {datetime.datetime.now() - t0}")
 
 
 rasterPermea = gdal.Open("permearepr.tif").ReadAsArray()
@@ -227,9 +245,10 @@ dataOccSol_modif = rasterOccSol_modif.reshape(dim1*dim2)
 dataBattance = rasterBattance.reshape(dim1*dim2)
 dimtot = dim1*dim2
 
-dimmax = 100000000
+dimmax = 10000000
 
 # _5a ###########################################################################
+log(fichier_log, f"...Début du Calcul pour 5a - temps total = {datetime.datetime.now() - t0}")
 suff = "_5a.tif"
 if dimtot > dimmax:
     nb = dimtot // dimmax
@@ -257,18 +276,18 @@ if dimtot > dimmax:
         threadsperblock = 1024
         blockspergrid = math.ceil(dataResult_p.shape[0] / threadsperblock)
         my_kernel[blockspergrid, threadsperblock](dataPentes_p,dataPermea_p,dataOccSol_p,dataBattance_p,dataResult_p,data_Ssbatt_p,dataDiff_p,tabCorCod,tabCoefBat, dataResult_sp, data_Ssbatt_sp)
-        print("...Traitement GPU terminé en : ", datetime.datetime.now() - debut)
+        log(fichier_log, f"...Traitement GPU terminé en : {datetime.datetime.now() - debut}")
         
         raster_result_lst.append(dataResult_p)
         raster_result_sp_lst.append(dataResult_sp)
         raster_result_ssbatt_lst.append(data_Ssbatt_p)
         raster_result_ssbatt_sp_lst.append(data_Ssbatt_sp)
         raster_diff_lst.append(dataDiff_p)
-    raster_result = np.concatenate(tuple(raster_result_lst))
-    raster_result_sp = np.concatenate(tuple(raster_result_sp_lst))
-    raster_result_ssbatt = np.concatenate(tuple(raster_result_ssbatt_lst))
-    raster_result_ssbatt_sp = np.concatenate(tuple(raster_result_ssbatt_sp_lst))
-    raster_diff = np.concatenate(tuple(raster_diff_lst))
+    raster_result = np.concatenate(tuple(raster_result_lst)).reshape(dim1,dim2)
+    raster_result_sp = np.concatenate(tuple(raster_result_sp_lst)).reshape(dim1,dim2)
+    raster_result_ssbatt = np.concatenate(tuple(raster_result_ssbatt_lst)).reshape(dim1,dim2)
+    raster_result_ssbatt_sp = np.concatenate(tuple(raster_result_ssbatt_sp_lst)).reshape(dim1,dim2)
+    raster_diff = np.concatenate(tuple(raster_diff_lst)).reshape(dim1,dim2)
 else:
     dataResult = dataOccSol_5a.copy()
     dataResult_sp = dataOccSol_5a.copy()
@@ -279,13 +298,14 @@ else:
     threadsperblock = 1024
     blockspergrid = math.ceil(dataResult.shape[0] / threadsperblock)
     my_kernel[blockspergrid, threadsperblock](dataPentes,dataPermea,dataOccSol_5a,dataBattance,dataResult,data_Ssbatt,dataDiff,tabCorCod,tabCoefBat, dataResult_sp, data_Ssbatt_sp)
-    print("...Traitement GPU terminé en : ", datetime.datetime.now() - debut)
+    log(fichier_log, f"...Traitement GPU terminé en : {datetime.datetime.now() - debut}")
     raster_result = dataResult.reshape(dim1,dim2)
     raster_result_ssbatt = data_Ssbatt.reshape(dim1,dim2)
     raster_result_ssbatt_sp = data_Ssbatt_sp.reshape(dim1,dim2)
     raster_result_sp = dataResult_sp.reshape(dim1,dim2)
     raster_diff = dataDiff.reshape(dim1,dim2)
 
+log(fichier_log, f"...Calcul pour 5a terminé - temps total de traitement : {datetime.datetime.now() - t0}")
 # Ecriture du fichier de sortie "ProdRuiss_Bat_Pent"
 debut = datetime.datetime.now()
 driver = gdal.GetDriverByName("GTiff")
@@ -298,7 +318,7 @@ outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparen
 outdata.FlushCache() ##saves to disk!!
 outdata = None
 ds=None
-print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
+log(fichier_log, f"...Ecriture fichier sortie terminée en : {datetime.datetime.now() - debut}")
 
 # Ecriture du fichier de sortie "ProdRuiss_Bat_ssPent"
 debut = datetime.datetime.now()
@@ -312,7 +332,7 @@ outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparen
 outdata.FlushCache() ##saves to disk!!
 outdata = None
 ds=None
-print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
+log(fichier_log, f"...Ecriture fichier sortie terminée en : {datetime.datetime.now() - debut}")
 
 # Ecriture du fichier de sortie "ProdRuiss_ssBat_Pent"
 debut = datetime.datetime.now()
@@ -326,7 +346,7 @@ outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparen
 outdata.FlushCache() ##saves to disk!!
 outdata = None
 ds=None
-print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
+log(fichier_log, f"...Ecriture fichier sortie terminée en : {datetime.datetime.now() - debut}")
 
 # Ecriture du fichier de sortie "ProdRuiss_ssBat_ssPent"
 debut = datetime.datetime.now()
@@ -340,9 +360,7 @@ outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparen
 outdata.FlushCache() ##saves to disk!!
 outdata = None
 ds=None
-print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
-
-print("...Temps total de traitement : ", datetime.datetime.now() - t0)
+log(fichier_log, f"...Ecriture fichier sortie terminée en : {datetime.datetime.now() - debut}")
 
 # Ecriture du fichier des différences
 debut = datetime.datetime.now()
@@ -356,12 +374,13 @@ outdiff.GetRasterBand(1).SetNoDataValue(91111)##if you want these values transpa
 outdiff.FlushCache() ##saves to disk!!
 outdiff = None
 ds=None
-print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
+log(fichier_log, f"...Ecriture fichier sortie terminée en : {datetime.datetime.now() - debut}")
 
-print("...Temps total de traitement : ", datetime.datetime.now() - t0)
+log(fichier_log, f"...Temps total de traitement pour _5a : {datetime.datetime.now() - t0}")
 
 
 # _2021 ###########################################################################
+log(fichier_log, f"...Début du Calcul pour 2021 - temps total = {datetime.datetime.now() - t0}")
 suff = "_2021.tif"
 if dimtot > dimmax:
     nb = dimtot // dimmax
@@ -389,18 +408,18 @@ if dimtot > dimmax:
         threadsperblock = 1024
         blockspergrid = math.ceil(dataResult_p.shape[0] / threadsperblock)
         my_kernel[blockspergrid, threadsperblock](dataPentes_p,dataPermea_p,dataOccSol_p,dataBattance_p,dataResult_p,data_Ssbatt_p,dataDiff_p,tabCorCod,tabCoefBat, dataResult_sp, data_Ssbatt_sp)
-        print("...Traitement GPU terminé en : ", datetime.datetime.now() - debut)
+        log(fichier_log, f"...Traitement GPU terminé en : {datetime.datetime.now() - debut}")
         
         raster_result_lst.append(dataResult_p)
         raster_result_sp_lst.append(dataResult_sp)
         raster_result_ssbatt_lst.append(data_Ssbatt_p)
         raster_result_ssbatt_sp_lst.append(data_Ssbatt_sp)
         raster_diff_lst.append(dataDiff_p)
-    raster_result = np.concatenate(tuple(raster_result_lst))
-    raster_result_sp = np.concatenate(tuple(raster_result_sp_lst))
-    raster_result_ssbatt = np.concatenate(tuple(raster_result_ssbatt_lst))
-    raster_result_ssbatt_sp = np.concatenate(tuple(raster_result_ssbatt_sp_lst))
-    raster_diff = np.concatenate(tuple(raster_diff_lst))
+    raster_result = np.concatenate(tuple(raster_result_lst)).reshape(dim1,dim2)
+    raster_result_sp = np.concatenate(tuple(raster_result_sp_lst)).reshape(dim1,dim2)
+    raster_result_ssbatt = np.concatenate(tuple(raster_result_ssbatt_lst)).reshape(dim1,dim2)
+    raster_result_ssbatt_sp = np.concatenate(tuple(raster_result_ssbatt_sp_lst)).reshape(dim1,dim2)
+    raster_diff = np.concatenate(tuple(raster_diff_lst)).reshape(dim1,dim2)
 else:
     dataResult = dataOccSol_2021.copy()
     dataResult_sp = dataOccSol_2021.copy()
@@ -411,12 +430,13 @@ else:
     threadsperblock = 1024
     blockspergrid = math.ceil(dataResult.shape[0] / threadsperblock)
     my_kernel[blockspergrid, threadsperblock](dataPentes,dataPermea,dataOccSol_2021,dataBattance,dataResult,data_Ssbatt,dataDiff,tabCorCod,tabCoefBat, dataResult_sp, data_Ssbatt_sp)
-    print("...Traitement GPU terminé en : ", datetime.datetime.now() - debut)
+    log(fichier_log, f"...Traitement GPU terminé en : {datetime.datetime.now() - debut}")
     raster_result = dataResult.reshape(dim1,dim2)
     raster_result_ssbatt = data_Ssbatt.reshape(dim1,dim2)
     raster_result_ssbatt_sp = data_Ssbatt_sp.reshape(dim1,dim2)
     raster_result_sp = dataResult_sp.reshape(dim1,dim2)
     raster_diff = dataDiff.reshape(dim1,dim2)
+log(fichier_log, f"...Fin du Calcul pour 2021 - temps total = {datetime.datetime.now() - t0}")
 
 # Ecriture du fichier de sortie "ProdRuiss_Bat_Pent"
 debut = datetime.datetime.now()
@@ -430,7 +450,7 @@ outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparen
 outdata.FlushCache() ##saves to disk!!
 outdata = None
 ds=None
-print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
+log(fichier_log, f"...Ecriture fichier sortie terminée en : {datetime.datetime.now() - debut}")
 
 # Ecriture du fichier de sortie "ProdRuiss_Bat_ssPent"
 debut = datetime.datetime.now()
@@ -444,7 +464,7 @@ outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparen
 outdata.FlushCache() ##saves to disk!!
 outdata = None
 ds=None
-print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
+log(fichier_log, f"...Ecriture fichier sortie terminée en : {datetime.datetime.now() - debut}")
 
 # Ecriture du fichier de sortie "ProdRuiss_ssBat_Pent"
 debut = datetime.datetime.now()
@@ -458,7 +478,7 @@ outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparen
 outdata.FlushCache() ##saves to disk!!
 outdata = None
 ds=None
-print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
+log(fichier_log, f"...Ecriture fichier sortie terminée en : {datetime.datetime.now() - debut}")
 
 # Ecriture du fichier de sortie "ProdRuiss_ssBat_ssPent"
 debut = datetime.datetime.now()
@@ -472,9 +492,7 @@ outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparen
 outdata.FlushCache() ##saves to disk!!
 outdata = None
 ds=None
-print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
-
-print("...Temps total de traitement : ", datetime.datetime.now() - t0)
+log(fichier_log, f"...Ecriture fichier sortie terminée en : {datetime.datetime.now() - debut}")
 
 # Ecriture du fichier des différences
 debut = datetime.datetime.now()
@@ -488,11 +506,12 @@ outdiff.GetRasterBand(1).SetNoDataValue(91111)##if you want these values transpa
 outdiff.FlushCache() ##saves to disk!!
 outdiff = None
 ds=None
-print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
+log(fichier_log, f"...Ecriture fichier sortie terminée en : {datetime.datetime.now() - debut}")
 
-print("...Temps total de traitement : ", datetime.datetime.now() - t0)
+log(fichier_log, f"...Temps total de traitement : {datetime.datetime.now() - t0}")
 
 # _modif ###########################################################################
+log(fichier_log, f"...Début du Calcul pour modif - temps total = {datetime.datetime.now() - t0}")
 suff = "_modif.tif"
 if dimtot > dimmax:
     nb = dimtot // dimmax
@@ -520,18 +539,18 @@ if dimtot > dimmax:
         threadsperblock = 1024
         blockspergrid = math.ceil(dataResult_p.shape[0] / threadsperblock)
         my_kernel[blockspergrid, threadsperblock](dataPentes_p,dataPermea_p,dataOccSol_p,dataBattance_p,dataResult_p,data_Ssbatt_p,dataDiff_p,tabCorCod,tabCoefBat, dataResult_sp, data_Ssbatt_sp)
-        print("...Traitement GPU terminé en : ", datetime.datetime.now() - debut)
+        log(fichier_log, f"...Traitement GPU terminé en : {datetime.datetime.now() - debut}")
         
         raster_result_lst.append(dataResult_p)
         raster_result_sp_lst.append(dataResult_sp)
         raster_result_ssbatt_lst.append(data_Ssbatt_p)
         raster_result_ssbatt_sp_lst.append(data_Ssbatt_sp)
         raster_diff_lst.append(dataDiff_p)
-    raster_result = np.concatenate(tuple(raster_result_lst))
-    raster_result_sp = np.concatenate(tuple(raster_result_sp_lst))
-    raster_result_ssbatt = np.concatenate(tuple(raster_result_ssbatt_lst))
-    raster_result_ssbatt_sp = np.concatenate(tuple(raster_result_ssbatt_sp_lst))
-    raster_diff = np.concatenate(tuple(raster_diff_lst))
+    raster_result = np.concatenate(tuple(raster_result_lst)).reshape(dim1,dim2)
+    raster_result_sp = np.concatenate(tuple(raster_result_sp_lst)).reshape(dim1,dim2)
+    raster_result_ssbatt = np.concatenate(tuple(raster_result_ssbatt_lst)).reshape(dim1,dim2)
+    raster_result_ssbatt_sp = np.concatenate(tuple(raster_result_ssbatt_sp_lst)).reshape(dim1,dim2)
+    raster_diff = np.concatenate(tuple(raster_diff_lst)).reshape(dim1,dim2)
 else:
     dataResult = dataOccSol_modif.copy()
     dataResult_sp = dataOccSol_modif.copy()
@@ -542,13 +561,14 @@ else:
     threadsperblock = 1024
     blockspergrid = math.ceil(dataResult.shape[0] / threadsperblock)
     my_kernel[blockspergrid, threadsperblock](dataPentes,dataPermea,dataOccSol_modif,dataBattance,dataResult,data_Ssbatt,dataDiff,tabCorCod,tabCoefBat, dataResult_sp, data_Ssbatt_sp)
-    print("...Traitement GPU terminé en : ", datetime.datetime.now() - debut)
+    log(fichier_log, f"...Traitement GPU terminé en : {datetime.datetime.now() - debut}")
     raster_result = dataResult.reshape(dim1,dim2)
     raster_result_ssbatt = data_Ssbatt.reshape(dim1,dim2)
     raster_result_ssbatt_sp = data_Ssbatt_sp.reshape(dim1,dim2)
     raster_result_sp = dataResult_sp.reshape(dim1,dim2)
     raster_diff = dataDiff.reshape(dim1,dim2)
 
+log(fichier_log, f"...Fin du Calcul pour modif - temps total = {datetime.datetime.now() - t0}")
 # Ecriture du fichier de sortie "ProdRuiss_Bat_Pent"
 debut = datetime.datetime.now()
 driver = gdal.GetDriverByName("GTiff")
@@ -561,7 +581,7 @@ outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparen
 outdata.FlushCache() ##saves to disk!!
 outdata = None
 ds=None
-print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
+log(fichier_log, f"...Ecriture fichier sortie terminée en : {datetime.datetime.now() - debut}")
 
 # Ecriture du fichier de sortie "ProdRuiss_Bat_ssPent"
 debut = datetime.datetime.now()
@@ -575,7 +595,7 @@ outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparen
 outdata.FlushCache() ##saves to disk!!
 outdata = None
 ds=None
-print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
+log(fichier_log, f"...Ecriture fichier sortie terminée en : {datetime.datetime.now() - debut}")
 
 # Ecriture du fichier de sortie "ProdRuiss_ssBat_Pent"
 debut = datetime.datetime.now()
@@ -589,7 +609,7 @@ outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparen
 outdata.FlushCache() ##saves to disk!!
 outdata = None
 ds=None
-print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
+log(fichier_log, f"...Ecriture fichier sortie terminée en : {datetime.datetime.now() - debut}")
 
 # Ecriture du fichier de sortie "ProdRuiss_ssBat_ssPent"
 debut = datetime.datetime.now()
@@ -603,9 +623,9 @@ outdata.GetRasterBand(1).SetNoDataValue(-1)##if you want these values transparen
 outdata.FlushCache() ##saves to disk!!
 outdata = None
 ds=None
-print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
+log(fichier_log, f"...Ecriture fichier sortie terminée en : {datetime.datetime.now() - debut}")
 
-print("...Temps total de traitement : ", datetime.datetime.now() - t0)
+log(fichier_log, f"...Temps total de traitement : {datetime.datetime.now() - t0}")
 
 # Ecriture du fichier des différences
 debut = datetime.datetime.now()
@@ -619,9 +639,9 @@ outdiff.GetRasterBand(1).SetNoDataValue(91111)##if you want these values transpa
 outdiff.FlushCache() ##saves to disk!!
 outdiff = None
 ds=None
-print("...Ecriture fichier sortie terminée en : ", datetime.datetime.now() - debut)
+log(fichier_log, f"...Ecriture fichier sortie terminée en : {datetime.datetime.now() - debut}")
 
-print("...Temps total de traitement : ", datetime.datetime.now() - t0)
+log(fichier_log, f"...Temps total de traitement : {datetime.datetime.now() - t0}")
 
 
 
