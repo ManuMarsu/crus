@@ -47,7 +47,7 @@ def my_kernel(R, K, tx_argile, tx_limon, tx_sable, pente, L, S, C, occ_sol, resu
             
     # Calcul des coefficients L, S
     L[pos] = 1.4 * math.pow((5/22.13), 0.4)
-    S[pos] = math.pow((math.sin(pente[pos]) / 0.0896), 1.3)
+    S[pos] = math.pow((math.sin(math.radians(pente[pos])) / 0.0896), 1.3)
     
     # Correspondance entre coefficient K et taux d'argile, limon et sable
     if tx_argile[pos] < 18 and tx_sable[pos] > 65:
@@ -61,7 +61,8 @@ def my_kernel(R, K, tx_argile, tx_limon, tx_sable, pente, L, S, C, occ_sol, resu
     elif tx_argile[pos] > 60:
         K[pos] = 0.0170
         
-    result_A[pos] = R[pos] * K[pos] * C[pos] * L[pos] * S[pos]
+    # result_A[pos] = R[pos] * K[pos] * C[pos] * L[pos] * S[pos]
+    result_A[pos] = S[pos]
     result_kg_px[pos] = result_A[pos] * 0.0025 * 1000
     result_epaisseur[pos] = (result_kg_px[pos] / 1250) / 25
     
@@ -109,7 +110,7 @@ def main():
     fichier_tx_argile = "argile.tif"
     fichier_tx_limon = "limon.tif"
     fichier_tx_sable = "sable.tif"
-    fichier_occ_sol = "occup terri.tif"
+    fichier_occ_sol = "occupation_sol.tif"
     
     sortie_A = "erodibilite_tonne_ha.tif"
     sortie_P = "erodibilite_kg_pixel.tif"
@@ -152,6 +153,7 @@ def main():
     tx_sable = cuda.to_device(np.ascontiguousarray(h_tx_sable, dtype = np.float32))
     occ_sol = cuda.to_device(np.ascontiguousarray(h_occ_sol, dtype = np.float32))
     
+    
     C = cuda.device_array_like(occ_sol)
     K = cuda.device_array_like(occ_sol)
     L = cuda.device_array_like(occ_sol)
@@ -192,6 +194,7 @@ def main():
     
     print("...Ecriture fichiers sortie terminée en : ", datetime.datetime.now() - debut)
     print("...Temps total de traitement : ", datetime.datetime.now() - t0)
+    
 
 
 if __name__ == '__main__':
