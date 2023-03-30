@@ -61,8 +61,7 @@ def my_kernel(R, K, tx_argile, tx_limon, tx_sable, pente, L, S, C, occ_sol, resu
     elif tx_argile[pos] > 60:
         K[pos] = 0.0170
         
-    # result_A[pos] = R[pos] * K[pos] * C[pos] * L[pos] * S[pos]
-    result_A[pos] = S[pos]
+    result_A[pos] = R[pos] * K[pos] * C[pos] * L[pos] * S[pos]
     result_kg_px[pos] = result_A[pos] * 0.0025 * 1000
     result_epaisseur[pos] = (result_kg_px[pos] / 1250) / 25
     
