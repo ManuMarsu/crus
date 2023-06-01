@@ -1,36 +1,36 @@
-*********************************************************** Début du traitement le 2023-03-28 19:20:30.903161 ***********************************************************...Lecture tableau de correspondance Terminée en : 0:00:00
-...Lecture tableau de correspondance Terminée en : 0:00:00
-...Lecture pente terminée en : 0:00:00.155807
-...Lecture permea terminée en : 0:00:00.054918
-...Lecture occsol terminée en : 0:00:00.054446
-...Lecture batt terminée en : 0:00:00.046934
+*********************************************************** Début du traitement le 2023-03-31 15:20:03.312709 ***********************************************************...Lecture tableau de correspondance Terminée en : 0:00:00.000993
+...Lecture tableau de correspondance Terminée en : 0:00:00.001001
+...Lecture pente terminée en : 0:00:00.116386
+...Lecture permea terminée en : 0:00:00.064000
+...Lecture occsol terminée en : 0:00:00.061999
+...Lecture batt terminée en : 0:00:00.061002
 début warp
 début warp
 début warp
 début warp
 fin warp
 fin warp
-...Fin du découpage permea - temps total = 0:00:15.061488
 fin warp
-...Fin du découpage occsol - temps total = 0:00:21.399106
-...Fin du découpage battance - temps total = 0:00:21.407146
+...Fin du découpage permea - temps total = 0:00:14.438888
+...Fin du découpage occsol - temps total = 0:00:14.444890
+...Fin du découpage battance - temps total = 0:00:14.448889
 fin warp
-...Fin du découpage pentes - temps total = 0:00:22.383227
-...Début du Calcul - temps total = 0:00:25.609961
-...Traitement GPU terminé en : 0:00:01.132343
-...Traitement GPU terminé en : 0:00:00.109177
-...Traitement GPU terminé en : 0:00:00.094065
-...Traitement GPU terminé en : 0:00:00.109130
-...Traitement GPU terminé en : 0:00:00.093596
-...Traitement GPU terminé en : 0:00:00.114187
-...Traitement GPU terminé en : 0:00:00.109729
-...Traitement GPU terminé en : 0:00:00.100081
-...Traitement GPU terminé en : 0:00:00.109432
-...Traitement GPU terminé en : 0:00:00.109307
-...Calcul terminé - temps total de traitement : 0:00:28.375076
-...Ecriture fichier sortie terminée en : 0:00:00.343880
-...Ecriture fichier sortie terminée en : 0:00:00.346615
-...Ecriture fichier sortie terminée en : 0:00:00.275428
-...Ecriture fichier sortie terminée en : 0:00:00.329903
-...Ecriture fichier sortie terminée en : 0:00:00.289046
-...Temps total de traitement pour _5a : 0:00:29.962945
+...Fin du découpage pentes - temps total = 0:00:15.076898
+...Début du Calcul - temps total = 0:00:18.853512
+...Traitement GPU terminé en : 0:00:01.508320
+...Traitement GPU terminé en : 0:00:00.102000
+...Traitement GPU terminé en : 0:00:00.102999
+...Traitement GPU terminé en : 0:00:00.104002
+...Traitement GPU terminé en : 0:00:00.104998
+...Traitement GPU terminé en : 0:00:00.103002
+...Traitement GPU terminé en : 0:00:00.104004
+...Traitement GPU terminé en : 0:00:00.103002
+...Traitement GPU terminé en : 0:00:00.102503
+...Traitement GPU terminé en : 0:00:00.101001
+...Calcul terminé - temps total de traitement : 0:00:21.933350
+...Ecriture fichier sortie terminée en : 0:00:00.276006
+...Ecriture fichier sortie terminée en : 0:00:00.299999
+...Ecriture fichier sortie terminée en : 0:00:00.338001
+...Ecriture fichier sortie terminée en : 0:00:00.281001
+...Ecriture fichier sortie terminée en : 0:00:00.263002
+...Temps total de traitement pour _5a : 0:00:23.400367
