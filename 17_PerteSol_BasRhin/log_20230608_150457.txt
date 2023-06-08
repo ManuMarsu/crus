@@ -1,0 +1,6 @@
+*********************************************************** Début du traitement le 2023-06-08 15:04:57.982306 ***********************************************************...Lecture R.tif terminée en : 0:00:00.067999
+...Lecture pente degres.tif terminée en : 0:00:00.060998
+...Lecture argile.tif terminée en : 0:00:00.061003
+...Lecture limon.tif terminée en : 0:00:00.063995
+...Lecture sable.tif terminée en : 0:00:00.062905
+...Lecture occupation_sol.tif terminée en : 0:00:00.063656
