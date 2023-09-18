@@ -1,0 +1,30 @@
+*********************************************************** Début du traitement le 2023-09-18 17:27:54.779193 ***********************************************************...Lecture tableau de correspondance Terminée en : 0:00:00
+...Lecture tableau de correspondance Terminée en : 0:00:00.003986
+...Lecture pente terminée en : 0:00:00.182312
+...Lecture permea terminée en : 0:00:00.045109
+...Lecture occsol terminée en : 0:00:00.043296
+...Lecture batt terminée en : 0:00:00.042234
+début warp
+début warp
+début warp
+début warp
+fin warp
+fin warp
+fin warp
+...Fin du découpage permea - temps total = 0:00:03.793554
+fin warp
+...Fin du découpage occsol - temps total = 0:00:04.133451
+...Fin du découpage battance - temps total = 0:00:04.137437
+...Fin du découpage pentes - temps total = 0:00:04.137437
+...Début du Calcul - temps total = 0:00:06.126089
+...Traitement GPU terminé en : 0:00:01.590392
+...Traitement GPU terminé en : 0:00:00.124077
+...Traitement GPU terminé en : 0:00:00.122333
+...Traitement GPU terminé en : 0:00:00.120009
+...Calcul terminé - temps total de traitement : 0:00:08.468391
+...Ecriture fichier sortie terminée en : 0:00:00.153123
+...Ecriture fichier sortie terminée en : 0:00:00.163949
+...Ecriture fichier sortie terminée en : 0:00:00.178436
+...Ecriture fichier sortie terminée en : 0:00:00.166001
+...Ecriture fichier sortie terminée en : 0:00:00.187003
+...Temps total de traitement pour _5a : 0:00:09.327904

@@ -206,6 +206,8 @@ t2c = threading.Thread(target=warp_raster, args=(fichierRasterOccSol_modif, "occ
 t3 = threading.Thread(target=warp_raster, args=(fichierRasterBattance, "battrepr.tif", [xmin, ymin, xmax, ymax], resX, resY, ))
 t4 = threading.Thread(target=warp_raster, args=(fichierRasterPentes, "penterepr.tif", [xmin, ymin, xmax, ymax], resX, resY, ))
 
+raster = gdal.Warp(raster_warped, ds, outputBounds=outputBounds, xRes=resX, yRes=resY, resampleAlg='bilinear', outputType=gdal.GDT_Int16, multithread=True)
+
 t1.start()
 t2a.start()
 t2b.start()
